@@ -112,6 +112,18 @@ export default async function handler(req: Request, res: ServerResponse) {
       return data ? send(res, { evaluation: data }) : send(res, { error: "Evaluation not found." }, 404);
     }
 
+    if (req.method === "PATCH" && evaluationMatch) {
+      const input = await body(req) as { form_config?: { criteria?: string[]; instructions?: string } };
+      const criteria = Array.isArray(input.form_config?.criteria) && input.form_config.criteria.length ? input.form_config.criteria.slice(0, 12).map(String) : [];
+      if (!criteria.length) return send(res, { error: "Add at least one evaluation criterion." }, 400);
+      const formConfig = { criteria, instructions: String(input.form_config?.instructions || "Please score the employee based on your direct experience.").slice(0, 1000) };
+      const { data, error } = await supabase.from("evaluation_sessions").update({ form_config: formConfig }).eq("id", Number(evaluationMatch[1])).eq("status", "draft").select("*, employees(*)").maybeSingle();
+      if (error) return send(res, { error: error.message }, 400);
+      if (!data) return send(res, { error: "Only draft evaluations can be edited." }, 409);
+      await audit(supabase, auth.user.id, "evaluation_form_updated", "evaluation", data.id, { criteria });
+      return send(res, { evaluation: data });
+    }
+
     if (req.method === "POST" && path === "evaluations") {
       const input = await body(req) as { employee_id: number; period?: string; form_config?: { criteria?: string[]; instructions?: string } };
       const publicToken = randomUUID().replaceAll("-", "");
