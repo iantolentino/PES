@@ -10,6 +10,7 @@ export default function CreateEvaluation() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("pes_access_token");
@@ -44,6 +45,7 @@ export default function CreateEvaluation() {
       const value = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(value.error || "Unable to create evaluation.");
       setMessage(`Evaluation created successfully${value.evaluation?.id ? ` (ID ${value.evaluation.id})` : ""}.`);
+      setShareUrl(value.public_url || "");
       setEmployeeId("");
     } catch (reason: any) { setError(reason.message || "Unable to create evaluation."); }
     finally { setSubmitting(false); }
@@ -73,6 +75,7 @@ export default function CreateEvaluation() {
         <Link to="/evaluations" className="rounded-lg border px-4 py-2">Cancel</Link>
       </div>
       {message && <p role="status" className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">{message}</p>}
+      {shareUrl && <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-900 dark:bg-indigo-950/40"><p className="text-sm font-semibold text-indigo-900 dark:text-indigo-200">Client evaluation link</p><p className="mt-1 break-all text-xs text-indigo-700 dark:text-indigo-300">{shareUrl}</p><div className="mt-3 flex flex-wrap gap-2"><a href={shareUrl} target="_blank" rel="noreferrer" className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">Preview form</a><button type="button" onClick={() => navigator.clipboard?.writeText(shareUrl)} className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-300">Copy link</button></div></div>}
     </form>
   </Page>;
 }
