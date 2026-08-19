@@ -25,7 +25,7 @@ export default async function handler(req: Request, res: ServerResponse) {
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname.replace(/^\/api\/?/, "");
-    const supabase: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+    let supabase: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
 
     if (req.method === "GET" && path === "health") return send(res, { ok: true, service: "pes-api", database: Boolean(process.env.SUPABASE_URL) });
 
@@ -45,6 +45,12 @@ export default async function handler(req: Request, res: ServerResponse) {
 
     const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
     if (!token) return send(res, { error: "Authentication required" }, 401);
+
+    // Pass the caller's JWT to PostgREST as well as auth.getUser(). Without
+    // this, database queries run as anon and RLS rejects employee inserts.
+    supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
     const { data: auth, error: authError } = await supabase.auth.getUser(token);
     if (authError || !auth.user) return send(res, { error: "Invalid session" }, 401);
     await ensureProfile(supabase, auth.user);
