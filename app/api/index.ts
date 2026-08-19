@@ -21,6 +21,11 @@ async function ensureProfile(supabase: any, user: { id: string; email?: string; 
   await supabase.from("profiles").upsert({ id: user.id, name: user.user_metadata?.name ?? user.email ?? "User", role: user.user_metadata?.role ?? "manager" }, { onConflict: "id" });
 }
 
+async function audit(supabase: any, actorId: string, action: string, entityType: string, entityId: number | null, metadata: Record<string, unknown> = {}) {
+  const { error } = await supabase.from("audit_logs").insert({ actor_id: actorId, action, entity_type: entityType, entity_id: entityId, metadata });
+  if (error) throw error;
+}
+
 export default async function handler(req: Request, res: ServerResponse) {
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -65,7 +70,13 @@ export default async function handler(req: Request, res: ServerResponse) {
     if (req.method === "POST" && path === "employees") {
       const input = await body(req) as { name: string; position?: string; department?: string };
       const { data, error } = await supabase.from("employees").insert({ ...input, manager_id: auth.user.id }).select().single();
+      if (!error && data) await audit(supabase, auth.user.id, "employee_created", "employee", data.id, { name: data.name });
       return error ? send(res, { error: error.message }, 400) : send(res, { employee: data }, 201);
+    }
+
+    if (req.method === "GET" && path === "audit-logs") {
+      const { data, error } = await supabase.from("audit_logs").select("*, profiles(name)").order("created_at", { ascending: false }).limit(100);
+      return error ? send(res, { error: error.message }, 500) : send(res, { logs: data });
     }
 
     if (req.method === "GET" && path === "evaluations") {
@@ -76,6 +87,7 @@ export default async function handler(req: Request, res: ServerResponse) {
     if (req.method === "POST" && path === "evaluations") {
       const input = await body(req) as { employee_id: number; period?: string };
       const { data, error } = await supabase.from("evaluation_sessions").insert({ employee_id: input.employee_id, period: input.period ?? String(new Date().getFullYear()), status: "draft", created_by: auth.user.id }).select().single();
+      if (!error && data) await audit(supabase, auth.user.id, "evaluation_created", "evaluation", data.id, { employee_id: data.employee_id, period: data.period });
       return error ? send(res, { error: error.message }, 400) : send(res, { evaluation: data }, 201);
     }
 
