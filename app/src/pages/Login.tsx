@@ -1,0 +1,1 @@
+export default function Login() { return <main className="container mx-auto max-w-md p-8"><h1 className="text-3xl font-bold">Sign in</h1><p className="mt-4">Demo mode is enabled.</p><button className="mt-6 rounded bg-primary px-4 py-2 text-primary-foreground">Continue</button></main>; }

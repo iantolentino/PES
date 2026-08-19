@@ -1,0 +1,5 @@
+api/
+db/
+contracts/
+node_modules/
+dist/
