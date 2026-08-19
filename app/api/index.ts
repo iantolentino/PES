@@ -17,6 +17,10 @@ async function body(req: Request) {
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
 }
 
+async function ensureProfile(supabase: ReturnType<typeof createClient>, user: { id: string; email?: string; user_metadata?: Record<string, any> | null }) {
+  await supabase.from("profiles").upsert({ id: user.id, name: user.user_metadata?.name ?? user.email ?? "User", role: user.user_metadata?.role ?? "manager" }, { onConflict: "id" });
+}
+
 export default async function handler(req: Request, res: ServerResponse) {
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -28,12 +32,14 @@ export default async function handler(req: Request, res: ServerResponse) {
     if (req.method === "POST" && path === "auth/login") {
       const input = await body(req) as { email: string; password: string };
       const { data, error } = await supabase.auth.signInWithPassword(input);
+      if (data.user) await ensureProfile(supabase, data.user);
       return error ? send(res, { error: error.message }, 401) : send(res, { session: data.session, user: data.user });
     }
 
     if (req.method === "POST" && path === "auth/register") {
       const input = await body(req) as { email: string; password: string; name?: string };
       const { data, error } = await supabase.auth.signUp({ email: input.email, password: input.password, options: { data: { name: input.name ?? input.email, role: "manager" } } });
+      if (data.user) await ensureProfile(supabase, data.user);
       return error ? send(res, { error: error.message }, 400) : send(res, { session: data.session, user: data.user }, 201);
     }
 
@@ -41,6 +47,7 @@ export default async function handler(req: Request, res: ServerResponse) {
     if (!token) return send(res, { error: "Authentication required" }, 401);
     const { data: auth, error: authError } = await supabase.auth.getUser(token);
     if (authError || !auth.user) return send(res, { error: "Invalid session" }, 401);
+    await ensureProfile(supabase, auth.user);
 
     if (req.method === "GET" && path === "me") return send(res, { user: auth.user });
 
