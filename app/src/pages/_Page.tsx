@@ -4,7 +4,7 @@ import { ClipboardCheck, FileClock, LayoutDashboard, Moon, Settings2, Sun, Users
 
 const links: [string, string, LucideIcon][] = [["/", "Dashboard", LayoutDashboard], ["/employees", "Employees", Users], ["/evaluations", "Evaluations", ClipboardCheck], ["/clients", "Clients", Users], ["/departments", "Departments", Settings2], ["/audit", "Audit logs", FileClock]];
 
-function ThemeSwitch({ dark, onToggle, mobile = false }: { dark: boolean; onToggle: () => void; mobile?: boolean }) {
+function ThemeSwitch({ dark, onToggle }: { dark: boolean; onToggle: () => void; mobile?: boolean }) {
   return <button type="button" onClick={onToggle} role="switch" aria-checked={dark} aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} title={dark ? "Switch to light mode" : "Switch to dark mode"} className="flex items-center gap-3 rounded-xl border p-2 text-left transition-colors dark:border-slate-700">
     <span className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors ${dark ? "bg-slate-700" : "bg-slate-200"}`}>
       <span className={`flex h-5 w-5 items-center justify-center rounded-full bg-white shadow-sm transition-transform ${dark ? "translate-x-5" : "translate-x-0"}`}>{dark ? <Moon size={12} className="text-slate-700" aria-hidden="true" /> : <Sun size={12} className="text-amber-500" aria-hidden="true" />}</span>

@@ -14,6 +14,7 @@ export default function Employees() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [csv, setCsv] = useState("");
 
   const loadEmployees = async () => {
     const token = localStorage.getItem("pes_access_token");
@@ -47,6 +48,7 @@ export default function Employees() {
     } catch (reason: any) { setError(reason.message || "Unable to add employee."); }
     finally { setSaving(false); }
   };
+  const importCsv = async () => { setError(""); const rows = csv.split(/\r?\n/).map(line => line.split(",")).filter(row => row[0]?.trim()).map(row => ({ name: row[0], position: row[1], department: row[2] })); try { const response = await fetch("/api/employees/bulk", { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.getItem("pes_access_token")}` }, body: JSON.stringify({ employees: rows }) }); const value = await response.json(); if (!response.ok) throw new Error(value.error); setMessage(`${value.employees?.length || 0} employees imported.`); setCsv(""); loadEmployees(); } catch (reason: any) { setError(reason.message || "Unable to import employees."); } };
 
   return <Page title="Employees">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -65,6 +67,7 @@ export default function Employees() {
       </div>
       <button disabled={saving} className="mt-5 rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{saving ? "Adding…" : "Save employee"}</button>
     </form>}
+    <section className="mt-5 max-w-2xl rounded-xl border bg-white p-6 shadow-sm"><h2 className="font-semibold">Bulk import</h2><p className="mt-1 text-sm text-slate-500">Paste CSV rows: name, position, department.</p><textarea value={csv} onChange={e => setCsv(e.target.value)} rows={3} className="mt-3 w-full rounded-lg border p-3 text-sm" placeholder="Jamie Rivera, Web Developer, IT" /><button type="button" onClick={importCsv} disabled={!csv.trim()} className="mt-3 rounded-lg border px-4 py-2 text-sm font-semibold disabled:opacity-40">Import CSV</button></section>
     <div className="mt-5 overflow-hidden rounded-xl border bg-white shadow-sm">
       {loading ? <p className="p-6 text-sm text-slate-500">Loading employees…</p> : employees.length === 0 ? <div className="p-6"><p className="font-medium">No employees yet</p><p className="mt-1 text-sm text-slate-500">Add your first employee above before creating an evaluation.</p></div> : <table className="w-full text-left text-sm"><thead className="bg-slate-50 text-slate-500"><tr><th className="p-4">Employee</th><th className="p-4">Position</th><th className="p-4">Department</th><th className="p-4">Status</th></tr></thead><tbody className="divide-y">{employees.map(employee => <tr key={employee.id}><td className="p-4"><Link className="font-medium text-indigo-700" to={`/employees/${employee.id}`}>{employee.name}</Link></td><td className="p-4 text-slate-600">{employee.position || "—"}</td><td className="p-4 text-slate-600">{employee.department || "—"}</td><td className="p-4"><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">{employee.status || "Active"}</span></td></tr>)}</tbody></table>}
     </div>
