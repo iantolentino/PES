@@ -64,6 +64,7 @@
     "vaul": "^1.1.2",
     "zod": "^4.3.5",
     "@tanstack/react-query": "^5.90.16",
+    "@supabase/supabase-js": "^2.57.4",
     "@trpc/client": "^11.8.1",
     "@trpc/react-query": "^11.8.1",
     "@trpc/server": "^11.8.1",
