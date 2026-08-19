@@ -17,7 +17,7 @@ async function body(req: Request) {
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
 }
 
-async function ensureProfile(supabase: ReturnType<typeof createClient>, user: { id: string; email?: string; user_metadata?: Record<string, any> | null }) {
+async function ensureProfile(supabase: any, user: { id: string; email?: string; user_metadata?: Record<string, any> | null }) {
   await supabase.from("profiles").upsert({ id: user.id, name: user.user_metadata?.name ?? user.email ?? "User", role: user.user_metadata?.role ?? "manager" }, { onConflict: "id" });
 }
 
@@ -25,7 +25,7 @@ export default async function handler(req: Request, res: ServerResponse) {
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname.replace(/^\/api\/?/, "");
-    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
+    const supabase: any = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
 
     if (req.method === "GET" && path === "health") return send(res, { ok: true, service: "pes-api", database: Boolean(process.env.SUPABASE_URL) });
 
