@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 
 type Request = IncomingMessage & { body?: unknown };
 type Response = ServerResponse & { status?: (code: number) => Response; json?: (value: unknown) => void };
@@ -48,6 +49,26 @@ export default async function handler(req: Request, res: ServerResponse) {
       return error ? send(res, { error: error.message }, 400) : send(res, { session: data.session, user: data.user }, 201);
     }
 
+    const publicMatch = path.match(/^public-evaluations\/([^/]+)$/);
+    if (publicMatch && req.method === "GET") {
+      const { data, error } = await supabase.from("evaluation_sessions").select("id, period, status, client_score, client_grade, submitted_at, employees(name)").eq("public_token", publicMatch[1]).maybeSingle();
+      if (error) return send(res, { error: error.message }, 500);
+      if (!data) return send(res, { error: "Evaluation link not found or expired." }, 404);
+      return send(res, { evaluation: data });
+    }
+
+    if (publicMatch && req.method === "POST") {
+      const input = await body(req) as { client_score: number; client_pct: number; client_comments?: string };
+      const score = Number(input.client_score);
+      const increase = Number(input.client_pct);
+      if (!Number.isFinite(score) || score < 0 || score > 100 || !Number.isFinite(increase) || increase < 0) return send(res, { error: "Enter a valid score and salary increase percentage." }, 400);
+      const grade = score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F";
+      const { data, error } = await supabase.from("evaluation_sessions").update({ client_score: score, client_grade: grade, client_pct: increase, client_comments: input.client_comments?.trim() || null, submitted_at: new Date().toISOString(), status: "manager_review" }).eq("public_token", publicMatch[1]).eq("status", "draft").is("submitted_at", null).select("id, period, status, client_score, client_grade, client_pct, submitted_at, employees(name)").maybeSingle();
+      if (error) return send(res, { error: error.message }, 400);
+      if (!data) return send(res, { error: "This evaluation has already been submitted or the link is invalid." }, 409);
+      return send(res, { evaluation: data });
+    }
+
     const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
     if (!token) return send(res, { error: "Authentication required" }, 401);
 
@@ -86,9 +107,10 @@ export default async function handler(req: Request, res: ServerResponse) {
 
     if (req.method === "POST" && path === "evaluations") {
       const input = await body(req) as { employee_id: number; period?: string };
-      const { data, error } = await supabase.from("evaluation_sessions").insert({ employee_id: input.employee_id, period: input.period ?? String(new Date().getFullYear()), status: "draft", created_by: auth.user.id }).select().single();
+      const publicToken = randomUUID().replaceAll("-", "");
+      const { data, error } = await supabase.from("evaluation_sessions").insert({ employee_id: input.employee_id, period: input.period ?? String(new Date().getFullYear()), status: "draft", created_by: auth.user.id, public_token: publicToken }).select().single();
       if (!error && data) await audit(supabase, auth.user.id, "evaluation_created", "evaluation", data.id, { employee_id: data.employee_id, period: data.period });
-      return error ? send(res, { error: error.message }, 400) : send(res, { evaluation: data }, 201);
+      return error ? send(res, { error: error.message }, 400) : send(res, { evaluation: data, public_url: `https://${req.headers.host || "pes-phi-eight.vercel.app"}/evaluation/${publicToken}` }, 201);
     }
 
     return send(res, { error: "Not found" }, 404);
