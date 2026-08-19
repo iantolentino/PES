@@ -7,6 +7,7 @@ import EmployeeDetail from "./pages/EmployeeDetail";
 import Evaluations from "./pages/Evaluations";
 import EvaluationDetail from "./pages/EvaluationDetail";
 import CreateEvaluation from "./pages/CreateEvaluation";
+import EvaluationPreview from "./pages/EvaluationPreview";
 import Clients from "./pages/Clients";
 import Departments from "./pages/Departments";
 import AuditLogs from "./pages/AuditLogs";
@@ -53,6 +54,7 @@ export default function App() {
       <Route path="/employees/:id" element={<RequireAuth><EmployeeDetail /></RequireAuth>} />
       <Route path="/evaluations" element={<RequireAuth><Evaluations /></RequireAuth>} />
       <Route path="/evaluations/new" element={<RequireAuth><CreateEvaluation /></RequireAuth>} />
+      <Route path="/evaluations/preview" element={<RequireAuth><EvaluationPreview /></RequireAuth>} />
       <Route path="/evaluations/:id" element={<RequireAuth><EvaluationDetail /></RequireAuth>} />
 
       <Route path="/clients" element={<RequireRole roles={["hr", "super_admin"]}><Clients /></RequireRole>} />
