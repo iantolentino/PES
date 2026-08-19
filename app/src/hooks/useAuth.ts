@@ -1,7 +1,6 @@
+import { useEffect, useState } from "react";
 export function useAuth() {
-  return {
-    isLoading: false,
-    isAuthenticated: true,
-    user: { id: 1, name: "Demo Admin", email: "admin@example.com", role: "super_admin" },
-  };
+  const [user, setUser] = useState<any>(null);
+  useEffect(() => { const token = localStorage.getItem("pes_access_token"); if (token) fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.ok ? r.json() : null).then(v => setUser(v?.user ?? null)).catch(() => setUser(null)); }, []);
+  return { isLoading: false, isAuthenticated: Boolean(user), user };
 }
