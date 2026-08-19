@@ -51,19 +51,19 @@ export default async function handler(req: Request, res: ServerResponse) {
 
     const publicMatch = path.match(/^public-evaluations\/([^/]+)$/);
     if (publicMatch && req.method === "GET") {
-      const { data, error } = await supabase.from("evaluation_sessions").select("id, period, status, public_employee_name, client_score, client_grade, submitted_at").eq("public_token", publicMatch[1]).maybeSingle();
+      const { data, error } = await supabase.from("evaluation_sessions").select("id, period, status, public_employee_name, form_config, client_score, client_grade, submitted_at").eq("public_token", publicMatch[1]).maybeSingle();
       if (error) return send(res, { error: error.message }, 500);
       if (!data) return send(res, { error: "Evaluation link not found or expired." }, 404);
       return send(res, { evaluation: data });
     }
 
     if (publicMatch && req.method === "POST") {
-      const input = await body(req) as { client_score: number; client_pct: number; client_comments?: string };
+      const input = await body(req) as { client_score: number; client_scores?: Record<string, number>; client_pct: number; client_comments?: string };
       const score = Number(input.client_score);
       const increase = Number(input.client_pct);
       if (!Number.isFinite(score) || score < 0 || score > 100 || !Number.isFinite(increase) || increase < 0) return send(res, { error: "Enter a valid score and salary increase percentage." }, 400);
       const grade = score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F";
-      const { data, error } = await supabase.from("evaluation_sessions").update({ client_score: score, client_grade: grade, client_pct: increase, client_comments: input.client_comments?.trim() || null, submitted_at: new Date().toISOString(), status: "manager_review" }).eq("public_token", publicMatch[1]).eq("status", "draft").is("submitted_at", null).select("id, period, status, public_employee_name, client_score, client_grade, client_pct, submitted_at").maybeSingle();
+      const { data, error } = await supabase.from("evaluation_sessions").update({ client_score: score, client_scores: input.client_scores || {}, client_grade: grade, client_pct: increase, client_comments: input.client_comments?.trim() || null, submitted_at: new Date().toISOString(), status: "manager_review" }).eq("public_token", publicMatch[1]).eq("status", "draft").is("submitted_at", null).select("id, period, status, public_employee_name, form_config, client_score, client_grade, client_pct, submitted_at").maybeSingle();
       if (error) return send(res, { error: error.message }, 400);
       if (!data) return send(res, { error: "This evaluation has already been submitted or the link is invalid." }, 409);
       return send(res, { evaluation: data });
@@ -105,12 +105,21 @@ export default async function handler(req: Request, res: ServerResponse) {
       return error ? send(res, { error: error.message }, 500) : send(res, { evaluations: data });
     }
 
+    const evaluationMatch = path.match(/^evaluations\/(\d+)$/);
+    if (req.method === "GET" && evaluationMatch) {
+      const { data, error } = await supabase.from("evaluation_sessions").select("*, employees(*)").eq("id", Number(evaluationMatch[1])).maybeSingle();
+      if (error) return send(res, { error: error.message }, 500);
+      return data ? send(res, { evaluation: data }) : send(res, { error: "Evaluation not found." }, 404);
+    }
+
     if (req.method === "POST" && path === "evaluations") {
-      const input = await body(req) as { employee_id: number; period?: string };
+      const input = await body(req) as { employee_id: number; period?: string; form_config?: { criteria?: string[]; instructions?: string } };
       const publicToken = randomUUID().replaceAll("-", "");
       const { data: employee, error: employeeError } = await supabase.from("employees").select("name").eq("id", input.employee_id).single();
       if (employeeError || !employee) return send(res, { error: "Selected employee was not found." }, 400);
-      const { data, error } = await supabase.from("evaluation_sessions").insert({ employee_id: input.employee_id, period: input.period ?? String(new Date().getFullYear()), status: "draft", created_by: auth.user.id, public_token: publicToken, public_employee_name: employee.name }).select().single();
+      const criteria = Array.isArray(input.form_config?.criteria) && input.form_config.criteria.length ? input.form_config.criteria.slice(0, 12).map(String) : ["Communication", "Quality of work", "Responsiveness", "Professionalism"];
+      const formConfig = { criteria, instructions: String(input.form_config?.instructions || "Please score the employee based on your direct experience.").slice(0, 1000) };
+      const { data, error } = await supabase.from("evaluation_sessions").insert({ employee_id: input.employee_id, period: input.period ?? String(new Date().getFullYear()), status: "draft", created_by: auth.user.id, public_token: publicToken, public_employee_name: employee.name, form_config: formConfig }).select().single();
       if (!error && data) await audit(supabase, auth.user.id, "evaluation_created", "evaluation", data.id, { employee_id: data.employee_id, period: data.period });
       return error ? send(res, { error: error.message }, 400) : send(res, { evaluation: data, public_url: `https://${req.headers.host || "pes-phi-eight.vercel.app"}/evaluation/${publicToken}` }, 201);
     }

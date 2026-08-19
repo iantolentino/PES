@@ -11,6 +11,9 @@ export default function CreateEvaluation() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
+  const [criteria, setCriteria] = useState(["Communication", "Quality of work", "Responsiveness", "Professionalism"]);
+  const [instructions, setInstructions] = useState("Please score the employee based on your direct experience.");
+  const [newCriterion, setNewCriterion] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("pes_access_token");
@@ -40,7 +43,7 @@ export default function CreateEvaluation() {
       const response = await fetch("/api/evaluations", {
         method: "POST",
         headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ employee_id: Number(employeeId), period }),
+        body: JSON.stringify({ employee_id: Number(employeeId), period, form_config: { criteria, instructions } }),
       });
       const value = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(value.error || "Unable to create evaluation.");
@@ -51,6 +54,7 @@ export default function CreateEvaluation() {
     finally { setSubmitting(false); }
   };
 
+  const addCriterion = () => { const value = newCriterion.trim(); if (value && !criteria.includes(value)) { setCriteria([...criteria, value]); setNewCriterion(""); } };
   return <Page title="Create evaluation">
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <div><p className="text-sm text-slate-500">Start a client evaluation session for a specific employee.</p></div>
@@ -58,7 +62,7 @@ export default function CreateEvaluation() {
     </div>
     <form onSubmit={submit} className="max-w-2xl rounded-xl border bg-white p-6 shadow-sm">
       <h2 className="text-lg font-semibold">New evaluation session</h2>
-      <p className="mt-1 text-sm text-slate-500">The client will score the employee and enter the requested salary increase percentage freely.</p>
+      <p className="mt-1 text-sm text-slate-500">Use the ready-made performance template or customize the client form before creating it.</p>
       {loading && <p className="mt-5 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">Loading employees…</p>}
       {error && <p role="alert" className="mt-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       <label className="mt-6 block text-sm font-medium">Employee
@@ -67,6 +71,7 @@ export default function CreateEvaluation() {
           {employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}{employee.department ? ` · ${employee.department}` : ""}</option>)}
         </select>
       </label>
+      <div className="mt-6 rounded-lg border bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50"><div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold">Standard performance template</h3><p className="mt-1 text-xs text-slate-500">These criteria will appear on the client form.</p></div><span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700">Ready to use</span></div><div className="mt-4 space-y-2">{criteria.map((criterion, index) => <div key={criterion} className="flex items-center justify-between rounded-md border bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"><span>{index + 1}. {criterion}</span><button type="button" disabled={criteria.length <= 1} onClick={() => setCriteria(criteria.filter(item => item !== criterion))} className="text-xs text-slate-400 hover:text-red-600 disabled:opacity-30">Remove</button></div>)}</div><div className="mt-3 flex gap-2"><input value={newCriterion} onChange={event => setNewCriterion(event.target.value)} onKeyDown={event => event.key === "Enter" && (event.preventDefault(), addCriterion())} className="min-w-0 flex-1 rounded-md border p-2 text-sm" placeholder="Add criterion" /><button type="button" onClick={addCriterion} className="rounded-md border px-3 py-2 text-xs font-semibold">Add</button></div><label className="mt-4 block text-sm font-medium">Client instructions<textarea rows={2} value={instructions} onChange={event => setInstructions(event.target.value)} className="mt-2 w-full rounded-md border p-2.5 text-sm" /></label></div>
       <label className="mt-4 block text-sm font-medium">Evaluation period
         <input required value={period} onChange={e => setPeriod(e.target.value)} className="mt-2 w-full rounded-lg border p-3" placeholder="2026 Mid-year" />
       </label>
