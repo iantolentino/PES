@@ -29,6 +29,12 @@ async function audit(supabase: any, actorId: string, action: string, entityType:
 
 function gradeForScore(score: number) { return score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F"; }
 function isExpired(item: any) { return Boolean(item.expires_at && new Date(item.expires_at).getTime() < Date.now() && !item.submitted_at); }
+const defaultFields = ["Communication", "Quality of work", "Responsiveness", "Professionalism"].map((label, index) => ({ id: `criterion-${index + 1}`, label, type: "rating", required: true }));
+function normaliseFields(input: any) {
+  const fields = Array.isArray(input?.fields) ? input.fields : (Array.isArray(input?.criteria) ? input.criteria : defaultFields.map(field => field.label)).map((label: string, index: number) => ({ id: `criterion-${index + 1}`, label, type: "rating", required: true }));
+  return fields.filter((field: any) => field && String(field.label || "").trim()).slice(0, 20).map((field: any, index: number) => ({ id: String(field.id || `field-${index + 1}`), label: String(field.label).trim().slice(0, 120), type: ["rating", "text", "textarea", "select"].includes(field.type) ? field.type : "text", required: Boolean(field.required), options: Array.isArray(field.options) ? field.options.map(String).slice(0, 20) : [] }));
+}
+function normaliseFormConfig(input: any) { const fields = normaliseFields(input); return { fields, criteria: fields.filter((field: any) => field.type === "rating").map((field: any) => field.label), instructions: String(input?.instructions || "Please score the employee based on your direct experience.").slice(0, 1000), scoringType: input?.scoringType === "overall" ? "overall" : "criteria_average" }; }
 
 export default async function handler(req: Request, res: ServerResponse) {
   try {
@@ -54,21 +60,25 @@ export default async function handler(req: Request, res: ServerResponse) {
 
     const publicMatch = path.match(/^public-evaluations\/([^/]+)$/);
     if (publicMatch && req.method === "GET") {
-      const { data, error } = await supabase.from("evaluation_sessions").select("id, period, status, public_employee_name, form_config, client_score, client_grade, submitted_at").eq("public_token", publicMatch[1]).maybeSingle();
+      const { data, error } = await supabase.from("evaluation_sessions").select("id, period, status, public_employee_name, public_employee_position, form_config, client_score, client_grade, submitted_at, expires_at").eq("public_token", publicMatch[1]).maybeSingle();
       if (error) return send(res, { error: error.message }, 500);
       if (!data) return send(res, { error: "Evaluation link not found or expired." }, 404);
+      if (isExpired(data)) return send(res, { error: "This evaluation link has expired." }, 410);
       return send(res, { evaluation: data });
     }
 
     if (publicMatch && req.method === "POST") {
-      const input = await body(req) as { client_score: number; client_scores?: Record<string, number>; client_pct: number; client_name?: string; client_company?: string; client_email?: string; client_comments?: string };
+      const input = await body(req) as { client_score: number; client_scores?: Record<string, number>; client_responses?: Record<string, unknown>; client_pct: number; client_name?: string; client_company?: string; client_email?: string; client_comments?: string };
       const score = Number(input.client_score);
       const increase = Number(input.client_pct);
       if (!Number.isFinite(score) || score < 0 || score > 100 || !Number.isFinite(increase) || increase < 0) return send(res, { error: "Enter a valid score and salary increase percentage." }, 400);
-      const { data: current } = await supabase.from("evaluation_sessions").select("expires_at").eq("public_token", publicMatch[1]).maybeSingle();
+      const { data: current } = await supabase.from("evaluation_sessions").select("expires_at, form_config").eq("public_token", publicMatch[1]).maybeSingle();
       if (isExpired(current)) return send(res, { error: "This evaluation link has expired." }, 410);
+      const fields = normaliseFields(current?.form_config); const responses = input.client_responses || {};
+      const missing = fields.find((field: any) => field.required && !String(responses[field.id] ?? "").trim());
+      if (missing) return send(res, { error: `Please complete: ${missing.label}` }, 400);
       const grade = gradeForScore(score);
-      const { data, error } = await supabase.from("evaluation_sessions").update({ client_score: score, client_scores: input.client_scores || {}, client_grade: grade, client_pct: increase, client_name: input.client_name?.trim() || null, client_company: input.client_company?.trim() || null, client_email: input.client_email?.trim() || null, client_comments: input.client_comments?.trim() || null, submitted_at: new Date().toISOString(), status: "manager_review" }).eq("public_token", publicMatch[1]).eq("status", "draft").is("submitted_at", null).select("id, period, status, public_employee_name, form_config, client_score, client_grade, client_pct, client_name, client_company, client_email, submitted_at").maybeSingle();
+      const { data, error } = await supabase.from("evaluation_sessions").update({ client_score: score, client_scores: input.client_scores || {}, client_responses: responses, client_grade: grade, client_pct: increase, client_name: input.client_name?.trim() || null, client_company: input.client_company?.trim() || null, client_email: input.client_email?.trim() || null, client_comments: input.client_comments?.trim() || null, submitted_at: new Date().toISOString(), status: "manager_review" }).eq("public_token", publicMatch[1]).eq("status", "draft").is("submitted_at", null).select("id, period, status, public_employee_name, public_employee_position, form_config, client_score, client_grade, client_pct, client_name, client_company, client_email, client_responses, submitted_at").maybeSingle();
       if (error) return send(res, { error: error.message }, 400);
       if (!data) return send(res, { error: "This evaluation has already been submitted or the link is invalid." }, 409);
       return send(res, { evaluation: data });
@@ -91,6 +101,14 @@ export default async function handler(req: Request, res: ServerResponse) {
     if (req.method === "GET" && path === "employees") {
       const { data, error } = await supabase.from("employees").select("*").order("name");
       return error ? send(res, { error: error.message }, 500) : send(res, { employees: data });
+    }
+
+    if (req.method === "PATCH" && path.match(/^employees\/\d+$/)) {
+      const employeeId = Number(path.split("/")[1]); const input = await body(req) as { name?: string; position?: string; department?: string; archived_at?: string | null };
+      if (!input.name?.trim()) return send(res, { error: "Employee name is required." }, 400);
+      const { data, error } = await supabase.from("employees").update({ name: input.name.trim(), position: input.position?.trim() || null, department: input.department?.trim() || null, archived_at: input.archived_at || null }).eq("id", employeeId).select().maybeSingle();
+      if (!error && data) await audit(supabase, auth.user.id, data.archived_at ? "employee_archived" : "employee_updated", "employee", employeeId, { name: data.name });
+      return error ? send(res, { error: error.message }, 400) : data ? send(res, { employee: data }) : send(res, { error: "Employee not found." }, 404);
     }
 
     if (req.method === "POST" && path === "employees") {
@@ -138,41 +156,77 @@ export default async function handler(req: Request, res: ServerResponse) {
       return error ? send(res, { error: error.message }, 400) : send(res, { template: data }, 201);
     }
 
+    if (req.method === "GET" && path === "forms") {
+      const { data, error } = await supabase.from("evaluation_forms").select("*").is("archived_at", null).order("created_at", { ascending: false });
+      return error ? send(res, { error: error.message }, 500) : send(res, { forms: data });
+    }
+    if (req.method === "POST" && path === "forms") {
+      const input = await body(req) as { name: string; description?: string; fields?: unknown[] };
+      const fields = normaliseFields({ fields: input.fields });
+      if (!input.name?.trim() || !fields.length) return send(res, { error: "Form name and at least one field are required." }, 400);
+      const { data, error } = await supabase.from("evaluation_forms").insert({ name: input.name.trim(), description: input.description?.trim() || null, fields, created_by: auth.user.id }).select().single();
+      return error ? send(res, { error: error.message }, 400) : send(res, { form: data }, 201);
+    }
+    const formMatch = path.match(/^forms\/(\d+)$/);
+    if (req.method === "PATCH" && formMatch) {
+      const input = await body(req) as { name?: string; description?: string; fields?: unknown[]; archived?: boolean };
+      const update: Record<string, unknown> = {}; if (input.name?.trim()) update.name = input.name.trim(); if (input.description !== undefined) update.description = input.description?.trim() || null; if (input.fields) update.fields = normaliseFields({ fields: input.fields }); if (input.archived !== undefined) update.archived_at = input.archived ? new Date().toISOString() : null;
+      const { data, error } = await supabase.from("evaluation_forms").update(update).eq("id", Number(formMatch[1])).select().maybeSingle(); return error ? send(res, { error: error.message }, 400) : data ? send(res, { form: data }) : send(res, { error: "Form not found." }, 404);
+    }
+
     if (req.method === "GET" && path === "evaluations") {
       const { data, error } = await supabase.from("evaluation_sessions").select("*, employees(*)").order("created_at", { ascending: false });
+      if (!error && data?.length) { const links = await supabase.from("evaluation_links").select("*, profiles(name)").in("evaluation_id", data.map((item: any) => item.id)).order("created_at", { ascending: false }); if (!links.error) data.forEach((item: any) => { item.links = (links.data || []).filter((link: any) => link.evaluation_id === item.id); }); }
       return error ? send(res, { error: error.message }, 500) : send(res, { evaluations: data });
     }
 
     const evaluationMatch = path.match(/^evaluations\/(\d+)$/);
     const decisionMatch = path.match(/^evaluations\/(\d+)\/decision$/);
+    const archiveEvaluationMatch = path.match(/^evaluations\/(\d+)\/archive$/);
     if (req.method === "GET" && evaluationMatch) {
       const { data, error } = await supabase.from("evaluation_sessions").select("*, employees(*)").eq("id", Number(evaluationMatch[1])).maybeSingle();
       if (error) return send(res, { error: error.message }, 500);
+      if (data) { const links = await supabase.from("evaluation_links").select("*, profiles(name)").eq("evaluation_id", data.id).order("created_at", { ascending: false }); if (!links.error) data.links = links.data || []; }
       return data ? send(res, { evaluation: data }) : send(res, { error: "Evaluation not found." }, 404);
     }
 
     if (req.method === "PATCH" && evaluationMatch) {
-      const input = await body(req) as { form_config?: { criteria?: string[]; instructions?: string; scoringType?: string }; expires_at?: string; client_name?: string; client_company?: string; client_email?: string };
-      const criteria = Array.isArray(input.form_config?.criteria) && input.form_config.criteria.length ? input.form_config.criteria.slice(0, 12).map(String) : [];
-      if (!criteria.length) return send(res, { error: "Add at least one evaluation criterion." }, 400);
-      const formConfig = { criteria, instructions: String(input.form_config?.instructions || "Please score the employee based on your direct experience.").slice(0, 1000), scoringType: input.form_config?.scoringType === "overall" ? "overall" : "criteria_average" };
+      const input = await body(req) as { form_config?: { fields?: unknown[]; criteria?: string[]; instructions?: string; scoringType?: string }; expires_at?: string; client_name?: string; client_company?: string; client_email?: string };
+      const formConfig = normaliseFormConfig(input.form_config); if (!formConfig.fields.length) return send(res, { error: "Add at least one evaluation field." }, 400);
       const { data, error } = await supabase.from("evaluation_sessions").update({ form_config: formConfig, expires_at: input.expires_at || null, client_name: input.client_name?.trim() || null, client_company: input.client_company?.trim() || null, client_email: input.client_email?.trim() || null }).eq("id", Number(evaluationMatch[1])).eq("status", "draft").select("*, employees(*)").maybeSingle();
       if (error) return send(res, { error: error.message }, 400);
       if (!data) return send(res, { error: "Only draft evaluations can be edited." }, 409);
-      await audit(supabase, auth.user.id, "evaluation_form_updated", "evaluation", data.id, { criteria });
+      await audit(supabase, auth.user.id, "evaluation_form_updated", "evaluation", data.id, { fields: formConfig.fields });
       return send(res, { evaluation: data });
     }
 
+    if (req.method === "POST" && archiveEvaluationMatch) {
+      const id = Number(archiveEvaluationMatch[1]); const input = await body(req) as { archived?: boolean }; const { data, error } = await supabase.from("evaluation_sessions").update({ archived_at: input.archived === false ? null : new Date().toISOString(), status: input.archived === false ? "draft" : "archived" }).eq("id", id).select().maybeSingle();
+      if (error) return send(res, { error: error.message }, 400); if (!data) return send(res, { error: "Evaluation not found." }, 404); await audit(supabase, auth.user.id, input.archived === false ? "evaluation_restored" : "evaluation_archived", "evaluation", id); return send(res, { evaluation: data });
+    }
+
     if (req.method === "POST" && path === "evaluations") {
-      const input = await body(req) as { employee_id: number; period?: string; expires_at?: string; client_name?: string; client_company?: string; client_email?: string; form_config?: { criteria?: string[]; instructions?: string; scoringType?: string } };
+      const input = await body(req) as { employee_id: number; form_id?: number; period?: string; expires_at?: string; max_submissions?: number; client_name?: string; client_company?: string; client_email?: string; form_config?: { fields?: unknown[]; criteria?: string[]; instructions?: string; scoringType?: string } };
       const publicToken = randomUUID().replaceAll("-", "");
-      const { data: employee, error: employeeError } = await supabase.from("employees").select("name").eq("id", input.employee_id).single();
+      const { data: employee, error: employeeError } = await supabase.from("employees").select("name, position").eq("id", input.employee_id).is("archived_at", null).single();
       if (employeeError || !employee) return send(res, { error: "Selected employee was not found." }, 400);
-      const criteria = Array.isArray(input.form_config?.criteria) && input.form_config.criteria.length ? input.form_config.criteria.slice(0, 12).map(String) : ["Communication", "Quality of work", "Responsiveness", "Professionalism"];
-      const formConfig = { criteria, instructions: String(input.form_config?.instructions || "Please score the employee based on your direct experience.").slice(0, 1000), scoringType: input.form_config?.scoringType === "overall" ? "overall" : "criteria_average" };
-      const { data, error } = await supabase.from("evaluation_sessions").insert({ employee_id: input.employee_id, period: input.period ?? String(new Date().getFullYear()), status: "draft", created_by: auth.user.id, public_token: publicToken, public_employee_name: employee.name, form_config: formConfig, expires_at: input.expires_at || null, client_name: input.client_name?.trim() || null, client_company: input.client_company?.trim() || null, client_email: input.client_email?.trim() || null }).select().single();
+      const period = input.period ?? String(new Date().getFullYear()); const formId = Number(input.form_id) || null; let duplicateQuery = supabase.from("evaluation_sessions").select("id").eq("employee_id", input.employee_id).eq("period", period).is("archived_at", null).not("status", "in", "(rejected,archived)"); duplicateQuery = formId ? duplicateQuery.eq("form_id", formId) : duplicateQuery.is("form_id", null); const duplicate = await duplicateQuery.limit(1);
+      if (!duplicate.error && duplicate.data?.length) return send(res, { error: "An active evaluation already exists for this employee and period." }, 409);
+      let selectedForm: any = null; if (formId) { const formResult = await supabase.from("evaluation_forms").select("id, name, fields").eq("id", formId).is("archived_at", null).maybeSingle(); if (formResult.error || !formResult.data) return send(res, { error: "Selected evaluation form was not found." }, 400); selectedForm = formResult.data; }
+      const formConfig = normaliseFormConfig(selectedForm ? { ...input.form_config, fields: selectedForm.fields } : input.form_config); if (!formConfig.fields.length) return send(res, { error: "Add at least one evaluation field." }, 400);
+      const { data, error } = await supabase.from("evaluation_sessions").insert({ employee_id: input.employee_id, form_id: formId, form_name: selectedForm?.name || null, period, status: "draft", created_by: auth.user.id, public_token: publicToken, public_employee_name: employee.name, public_employee_position: employee.position, form_config: formConfig, expires_at: input.expires_at || null, client_name: input.client_name?.trim() || null, client_company: input.client_company?.trim() || null, client_email: input.client_email?.trim() || null }).select().single();
       if (!error && data) await audit(supabase, auth.user.id, "evaluation_created", "evaluation", data.id, { employee_id: data.employee_id, period: data.period });
+      if (!error && data) { const link = await supabase.from("evaluation_links").insert({ evaluation_id: data.id, token: publicToken, expires_at: input.expires_at || null, max_submissions: Math.max(1, Number(input.max_submissions || 1)), created_by: auth.user.id }).select().single(); if (link.error) return send(res, { error: link.error.message }, 400); }
       return error ? send(res, { error: error.message }, 400) : send(res, { evaluation: data, public_url: `https://${req.headers.host || "pes-phi-eight.vercel.app"}/evaluation/${publicToken}` }, 201);
+    }
+
+    const regenerationMatch = path.match(/^evaluations\/(\d+)\/regenerate-link$/);
+    if (req.method === "POST" && regenerationMatch) {
+      const id = Number(regenerationMatch[1]); const { data: current, error: currentError } = await supabase.from("evaluation_sessions").select("*").eq("id", id).maybeSingle();
+      if (currentError || !current) return send(res, { error: "Evaluation not found." }, 404);
+      if (current.submitted_at || current.client_score != null) return send(res, { error: "Submitted evaluations cannot generate another link." }, 409);
+      const newToken = randomUUID().replaceAll("-", ""); const input = await body(req) as { expires_at?: string; max_submissions?: number }; const link = await supabase.from("evaluation_links").insert({ evaluation_id: id, token: newToken, expires_at: input.expires_at || null, max_submissions: Math.max(1, Number(input.max_submissions || 1)), created_by: auth.user.id }).select().single();
+      if (link.error) return send(res, { error: link.error.message }, 400); const { data, error } = await supabase.from("evaluation_sessions").update({ public_token: newToken, expires_at: input.expires_at || null }).eq("id", id).select().single(); if (error) return send(res, { error: error.message }, 400); await audit(supabase, auth.user.id, "token_regenerated", "evaluation", id, { link_id: link.data.id }); return send(res, { evaluation: data, public_url: `https://${req.headers.host || "pes-phi-eight.vercel.app"}/evaluation/${newToken}` });
     }
 
     if (req.method === "POST" && decisionMatch) {
