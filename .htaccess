@@ -1,0 +1,11 @@
+RewriteEngine On
+
+# /evaluation/{token} -> frontend/public/evaluation.php?token={token}
+RewriteRule ^evaluation/([a-f0-9]{64})/?$ frontend/public/evaluation.php?token=$1 [L,QSA]
+
+# Never serve the SQLite database file
+<IfModule mod_headers.c>
+  <FilesMatch "\.sqlite$">
+    Require all denied
+  </FilesMatch>
+</IfModule>

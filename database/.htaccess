@@ -1,0 +1,2 @@
+# Block all web access to the SQLite database file
+Require all denied
