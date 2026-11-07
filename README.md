@@ -1,5 +1,5 @@
 # Performance Evaluation System
-
+ 
 Vanilla PHP 8 + SQLite (PDO), no Composer, no external dependencies. Matches
 your usual stack for internal tools.
 
